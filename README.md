@@ -70,14 +70,77 @@ class SwitchImplTest (unittest.TestCase):
       self.assertEqual(e.match, ofp_match(in_port=1, nw_src="1.2.3.4"))
     
     def test_flow_mod(self):
+      c = self.conn
+      s = self.switch
+      c.to_switch(ofp_flow_mod(xid=124, priority=1,
+        match=ofp_match(in_port=1, nw_src="1.2.3.4")))
+      self.assertEqual(len(c.received), 0)
+      self.assertEqual(len(s.table), 1)
+      e = s.table.entries[0]
+      self.assertEqual(e.priority,1)
+      self.assertEqual(e.match, ofp_match(in_port=1, nw_src="1.2.3.4"))
     
     def test_packet_out(self):
+      c = self.conn
+      s = self.switch
+      received = []
+      s.addListener(DpPacketOut, lambda(evnet): received.append(event))
+      
+      packet = self.packet
+      c.to_switch(ofp_packet_out(data=packet,
+        actions=[ofp_action_output(port=2)]))
+      self.assertEqual(len(c.received), 0)
+      self.assertEqual(len(received), 1)
+      event = received[0]
+      self.assertEqual(event.port.port_no,2)
+      self.assertEqual(evnet.packet.pack(), packet.pack())
     
     def test_rx_packet(self):
+      c = self.conn
+      s = self.switch
+      received = []
+      s.addListener(DpPacketOut, lambda(event): received.append(event))
+      s.rx_packet(self.packet, in_port=1)
+      self.assertEqual(lne(c.received), 1)
+      self.assertTrue(isinstance(c.last, ofp_packet_in),
+        "should have received pa")
+      self.assertTrue(c.last.buffer_id > 0)
+      
+      c.to_switch(ofp_flow_mod(xid=124, buffer_id=c.last.buffer_id, priority=1,
+        match=ofp_match(in_port=1, nw_src="1.2.3.4"),
+        actions = [ ofp_action_output(port=3) ]
+        ))
+      
+      self.assertEqual(len(received), 1)
+      event = received[0]
+      self.assertEqual(event.port.port_no,3)
+      self.assertEqual(evnet.packet, self.packet)
+      
+      c.received = []
+      received = []
+      s.rx_packet(self.packet, in_port=1)
+      self.assertEqual(len(c.received), 0)
+      
+      self.assertEqual(len(received), 1)
+      event = received[0]
+      self.assertEqual(evnet.port.port_no,3)
+      self.assertEqual(event.packet, self.packet)
     
     def test_delete_port(self):
+      c = self.conn
+      s = self.switch
+      original_num_ports = len(self.switch.ports)
+      p = self.switch.ports.values()[0]
+      s.delete_port(p)
+      new_num_ports = len(self.switch.ports)
+      self.assertTrue(new_num_ports == oroginal_num_ports - 1,
+        "Should have removed the port")
+      self.assertEqual(len(c.received), 1)
+      self.assertTrue(isinstance(c.last, ofp_port_status),
+        "should have received port_status but got %s" % c.last)
+      self.assertTrue(c.last.reason == OFPPR_DELETE)
     
-    def test_add_port():
+    def test_add_port(self):
       c = self.conn
       s = self.switch
       port_count = len(self.switch.ports)
