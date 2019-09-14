@@ -44,45 +44,135 @@ class SwitchImplTest (unittest.TestCase):
       dstip=IPAddr("1.2.3.5"),
       payload=udp(srcport=1234, dstport=53, payload="haha")))
       
-    def test_hello
+    def test_hello(self):
+      c = self.conn
+      c.to_switch(ofp_hello(xid=123))
+      self.assertEqual(len(c.received), 1)
+      self.assertTrue(isinstance(c.last, ofp_hello),
+        "should have received hello but got %s" % c.last)
     
-    def test_echo_request():
+    def test_echo_request(self):
+      c = self.conn
+      c.to_switch(ofp_echo_request(xid=123))
+      self.assertEqual(len(c.received), 1)
+      self.assertEqual(isinstance(c.last, ofp_echo_reply) and c.last.xid == 123,
+        "should have receied echo reply but got %s" % c.last)
     
-    def test_barrier():
+    def test_barrier(self):
+      c = self.conn
+      s = self.switch
+      c.to_switch(ofp_flow_mod(xid=124, priority=1,
+        match=ofp_match(in_port=1, nw_src="1.2.3.4")))
+      self.assertEqual(len(c.received), 0)
+      self.assertEqual(len(s.table), 1)
+      e = s.table.entries[0]
+      self.assertEqual(e.priority,1)
+      self.assertEqual(e.match, ofp_match(in_port=1, nw_src="1.2.3.4"))
     
-    def test_flow_mod():
+    def test_flow_mod(self):
     
-    def test_packet_out():
+    def test_packet_out(self):
     
-    def test_rx_packet():
+    def test_rx_packet(self):
     
-    def test_delete_port()
+    def test_delete_port(self):
     
     def test_add_port():
+      c = self.conn
+      s = self.switch
+      port_count = len(self.switch.ports)
+      old_port = s.delete_port(1)
+      self.assertTrue(port_count - 1 == len(self.switch.ports),
+        "Should have removed port")
+      self.assertFalse(old_port.port_no inself.seitch.ports,
+        "Should have removedport")
+      s.add_port(old_port)
+      self.assertTrue(old_port.port_no in self.switch.ports,
+        "Should have added port")
+      self.assertEqual(len(c.received), 2)
+      self.assertTrue(isinstance(c.last, ofp_port_status),
+        "should have received port_status but got %s" % c.last)
+      self.assertTrue(c.last.reason == OFPPR_ADD)
     
-    def test_port_mod_failed():
+    def test_port_mod_link_down(self):
+      c = self.conn
+      
+      msg = ofp_port_mod()
+      msg.port_no = 1234
+      c.to_switch(msg)
+      self.assertEqual(len(c.received), 1)
+      self.assertTrue(isinstance(c.last, ofp_error))
+      self.asertTrue(c.last_type == OFPET_PORT_MOD_FAILED)
+      self.assertTrue(c.last.code == OFPPMFC_BAD_PORT)
+      
+      msg.port_no = 1
+      msg.hw_add = EthAddr("11:22:33:44:55:66")
+      c.to_switch(msg)
+      self.assertEqual(len(c.receied), 2)
+      self.assertTrue(isinstance(c.last, ofp_error))
+      self.assertTrue(c.last.type == OFPET_PORT_MOD_FAILED)
+      self.assertTrue(c.last.code == OFPPMC_BAD_HW_ADDR)
     
-    def test_port_mod_link_down():
+    def test_port_mod_link_down(self):
+      c = self.conn
+      s = self.switch
+      
+      msg = ofp_port_mod()
+      msg.port_no = 1
+      msg.hw_addr = s.ports[1].hw_addr
+      msg.mask = OFPPC_PORT_DOWN
+      msg.config = OFPPC_PORT_DOWN
+      c.to_switch(msg)
+      self.assertEqual(len(c.received), 1)
+      self.assertTrue(isinstance(c.last, ofp_port_status))   
     
-class PackingTest ():
+class PackingTest (SwitchImpTest):
+  _do_packing = True
 
 class ProcessFlowModTest():
   _do_packing = False
   
   def setUp():
+    self.conn = MockConnection(self._do_packing)
+    self.switch = SoftwareSwitch(1, name="sw1")
+    self.switch.set_connection(self.conn)
+    self.packet = ethrnet(
+      src=EthAddr("00:00:00:00:00:01"),
+      dst=EthAddr("00:00:00:00:00:02"),
+      payload=ipv4(srcip=IPAddr("1.2.3.4")),
+      dstip=IPAddr("1.2.3.5"),
+      payload=udp(srcport=1234, dstport=53, payload="haha")))
   
-  def test_process_flow_mod_add():
+  def test_process_flow_mod_add(self):
+    """ """
+    c = self.conn
+    s = self.switch
+    t = s.table
+    
+    msg = ofp_flow_mod(priority=5, cookie=0x31415926, actions=[ofp_action_output(port=5)])
+    c.to_switch(msg)
+    
+    self.assertEqual(len(t.entries), 1)
+    e = t.entries[0]
+    self.assertEqual(e.priority, 5)
+    self.assertEqual(e.cookie, 0x31415926)
+    self.assertEqual(e.actions, [ ofp_action_output(port=5)])
   
-  def test_process_flow_mod_modify():
-  
+  def test_process_flow_mod_modify(self):
+    """ """
     c = self.conn
     s = self.switch
     
     def table():
       t = FlowTable()
+      t.add_entry(TableEntry(priority=6, cookie=0x1, match=ofp_match("00:00:00:00:00:01"),nw_src="1.2.3.4"), actions=[ofp_action_output(port=5)])
+      t.add_entry(TableEntry(priority=5, cookie=0x2, match=ofp_match(dl_src=EthAddr("00:00:00:00:00:02"), new_src="1.2.3.0/24"), actions=[ofp_action_output(port=6)]))
+      t.add_entry(TableEntry(priority=1, cookie=0x3, match=ofp_match(), actions=[]))
+      return t
       
     s.table = table()
     t = s.table
+    
     
   def test_process_flow_mod_modify_strict():
     """ """
@@ -90,8 +180,24 @@ class ProcessFlowModTest():
     s = self.switch
     
     def table():
+      t = FlowTable(TableEntry(priority=6, cookie=0x1, match=ofp_match("00:00:00:00:00:01"),nw_src="1.2.3.4"), actions=[ofp_action_output(port=5))
+      t.add_entry(TableEntry(priority=5, cookie=0x2, match=ofp_match(dl_src=EthAddr("00:00:00:00:02"),nw_src="1.2.3.0/24"), actions=[ofp_action_output(port=6)]))
+      t.add_entry(TableEntry(priority=1, cookie=0x3, match=ofp_match(), actions=[]))
+      return t
     
     s.table = table()
+    t = s.table
+    msg = ofp_flow_mod(command = OFPFC_MODIFY_STICT, priority=1, match=ofp_match(), actions = [ofp_action_output(port=1)])
+    c.to_switch(msg)
+    self.assertEquals([e.cookie for e in t.entries if e.actions == [ofp_action_output(port=1) ], [3]])
+    self.assertEquals(len(t.entries), 3)
+    
+    s.table = table()
+    t = s.table
+    msg = ofp_flow_mod(command = OFPFC_MODIFY_STRICT, priority=5, match=ofp_match(dl_src=EthAddr("00:00:00:00:00:02"), nw_src="1.2.3.0/24"))
+    c.to_switch(msg)
+    self.assertEquals([e.cookie for e in t.entries if e.actions == [ofp_action_output(port=8) ], [2]])
+    self.assertEquals(t.entries), 3)
     
 if __name__ == '__main__':
   unittest.main()
